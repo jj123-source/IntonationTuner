@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Precision Guitar Intonation Tuner</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkBg: '#0f172a',
+                        cardBg: '#1e293b',
+                        accentGreen: '#10b981',
+                        accentRed: '#ef4444',
+                        accentAmber: '#f59e0b',
+                        accentCyan: '#06b6d4'
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        
+        /* Smooth gauge needle transitions */
+        .needle-transition {
+            transition: transform 0.08s cubic-bezier(0.1, 0.9, 0.2, 1);
+        }
+
+        /* Custom glow effects */
+        .glow-green {
+            box-shadow: 0 0 25px rgba(16, 185, 129, 0.4);
+        }
+        .glow-red {
+            box-shadow: 0 0 25px rgba(239, 68, 68, 0.4);
+        }
+        .glow-cyan {
+            box-shadow: 0 0 25px rgba(6, 182, 212, 0.4);
+        }
+
+        /* Prevent rubber-band scroll on iOS */
+        html, body {
+            overflow: hidden;
+            height: 100%;
+            width: 100%;
+            position: fixed;
+        }
+    </style>
+</head>
+<body class="bg-darkBg text-slate-100 flex flex-col h-full overflow-hidden select-none">
+
+    <!-- Top App Bar -->
+    <header class="bg-cardBg border-b border-slate-700/60 px-4 py-3 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2">
+            <i class="fa-solid fa-guitar text-accentCyan text-xl"></i>
+            <h1 class="font-bold text-lg tracking-wide text-slate-100">IntonationPro</h1>
+        </div>
+        
+        <!-- Audio Control Toggle -->
+        <button id="micBtn" onclick="toggleAudio()" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-700/80 hover:bg-slate-600 active:scale-95 transition text-xs font-semibold border border-slate-600 text-slate-200">
+            <span id="micIcon" class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block animate-pulse"></span>
+            <span id="micText">TAP TO START</span>
+        </button>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="bg-slate-900/80 p-1 flex justify-center border-b border-slate-800 shrink-0">
+        <div class="grid grid-cols-2 w-full max-w-md bg-slate-800/80 rounded-lg p-1 border border-slate-700/50">
+            <button id="tabTuner" onclick="switchTab('tuner')" class="py-2 text-xs font-bold rounded-md bg-accentCyan text-slate-950 transition shadow">
+                <i class="fa-solid fa-wave-square mr-1"></i> Chromatic Tuner
+            </button>
+            <button id="tabIntonation" onclick="switchTab('intonation')" class="py-2 text-xs font-bold rounded-md text-slate-400 hover:text-slate-200 transition">
+                <i class="fa-solid fa-sliders mr-1"></i> Intonation Wizard
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Dynamic Content Container -->
+    <main class="flex-1 flex flex-col overflow-y-auto relative p-4 max-w-md mx-auto w-full justify-between">
+
+        <!-- ==================== TAB 1: CHROMATIC TUNER ==================== -->
+        <section id="viewTuner" class="flex-1 flex flex-col justify-between items-center w-full">
+            
+            <!-- Signal Level Indicator & Noise Gate -->
+            <div class="w-full flex items-center justify-between text-xs text-slate-400 px-2 py-1 bg-slate-800/40 rounded-lg border border-slate-800">
+                <div class="flex items-center gap-2 flex-1 mr-4">
+                    <span class="text-[10px] uppercase font-bold text-slate-500">Signal</span>
+                    <div class="flex-1 bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-700">
+                        <div id="signalMeter" class="bg-accentCyan h-full w-0 transition-all duration-75"></div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label for="gateSlider" class="text-[10px] uppercase font-bold text-slate-500">Gate</label>
+                    <input id="gateSlider" type="range" min="0" max="0.05" step="0.002" value="0.008" oninput="updateGate(this.value)" class="w-16 accent-accentCyan cursor-pointer">
+                </div>
+            </div>
+
+            <!-- Pitch Display Centerpiece -->
+            <div class="flex flex-col items-center justify-center my-auto py-4">
+                <!-- Large Note Name -->
+                <div class="relative flex items-center justify-center">
+                    <div id="noteBadge" class="text-7xl font-black tracking-tight text-slate-100 transition duration-150">
+                        --
+                    </div>
+                    <span id="octaveBadge" class="absolute -right-6 bottom-2 text-2xl font-bold text-slate-400"></span>
+                </div>
+
+                <!-- Frequency Details -->
+                <div class="mt-2 text-center">
+                    <div class="text-sm font-semibold text-slate-300">
+                        <span id="freqDetected" class="text-accentCyan font-mono text-base">0.0</span> <span class="text-xs text-slate-500">Hz</span>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-0.5">
+                        Target: <span id="freqTarget" class="font-mono text-slate-400">0.0</span> Hz
+                    </div>
+                </div>
+            </div>
+
+            <!-- Visual Tuner Arc/Gauge -->
+            <div class="w-full bg-cardBg/90 border border-slate-700/80 rounded-2xl p-4 shadow-xl flex flex-col items-center">
+                <!-- Tuner Gauge Canvas -->
+                <div class="relative w-full aspect-[2/1] max-h-48 flex items-center justify-center">
+                    <canvas id="gaugeCanvas" class="w-full h-full"></canvas>
+                </div>
+
+                <!-- Deviation Cents Badge -->
+                <div id="centsContainer" class="mt-1 px-4 py-1 rounded-full bg-slate-800 border border-slate-700 flex items-center gap-1.5">
+                    <span id="centsText" class="text-lg font-bold font-mono text-slate-300">+0.0</span>
+                    <span class="text-xs text-slate-500 uppercase font-bold">Cents</span>
+                </div>
+            </div>
+
+            <!-- Tuning Target Presets Selector -->
+            <div class="w-full mt-3">
+                <div class="text-[10px] font-bold text-slate-500 uppercase mb-1 px-1">Guitar Tuning Presets</div>
+                <select id="tuningSelect" onchange="onTuningPresetChange()" class="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-accentCyan">
+                    <option value="standard">Standard Tuning (E2 A2 D3 G3 B3 E4)</option>
+                    <option value="dropd">Drop D (D2 A2 D3 G3 B3 E4)</option>
+                    <option value="halfstep">Half-Step Down (D#2 G#2 C#3 F#3 A#3 D#4)</option>
+                    <option value="fullstep">Full-Step Down (D2 G2 C3 F3 A3 D4)</option>
+                    <option value="openG">Open G (D2 G2 D3 G3 B3 D4)</option>
+                    <option value="openD">Open D (D2 A2 D3 F#3 A3 D4)</option>
+                </select>
+            </div>
+        </section>
+
+        <!-- ==================== TAB 2: INTONATION WIZARD ==================== -->
+        <section id="viewIntonation" class="flex-1 flex flex-col justify-between items-center w-full hidden">
+            
+            <!-- Target String Selector Carousel / Grid -->
+            <div class="w-full bg-cardBg border border-slate-700/80 rounded-xl p-3 shadow-lg">
+                <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex justify-between">
+                    <span>Select Target String</span>
+                    <span id="currentTuningName" class="text-accentCyan font-semibold">Standard Tuning</span>
+                </div>
+                <div id="stringSelector" class="grid grid-cols-6 gap-1.5">
+                    <!-- Strings populated dynamically via JavaScript -->
+                </div>
+            </div>
+
+            <!-- Intonation Measurement Steps Box -->
+            <div class="w-full bg-cardBg border border-slate-700/80 rounded-xl p-4 shadow-xl my-3 flex-1 flex flex-col justify-around">
+                
+                <!-- Step 1: Open String / 12th Harmonic -->
+                <div id="step1Box" class="p-3 rounded-lg bg-slate-800/80 border border-slate-700/80 transition">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs font-bold text-slate-300">STEP 1: Open String Pitch</span>
+                        <span id="openLockBadge" class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700 text-slate-400">UNLOCKED</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-xs text-slate-400">Target: <span id="openTargetNote" class="text-slate-200 font-bold">E2</span></div>
+                            <div class="text-sm font-mono text-slate-300"><span id="openFreqVal">--</span> Hz (<span id="openCentsVal">--</span>)</div>
+                        </div>
+                        <button onclick="captureOpenPitch()" class="px-3 py-1.5 bg-accentCyan hover:bg-cyan-400 text-slate-950 font-bold text-xs rounded-lg active:scale-95 transition shadow">
+                            <i class="fa-solid fa-lock mr-1"></i> Capture Open
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Fretted 12th Fret -->
+                <div id="step2Box" class="p-3 rounded-lg bg-slate-800/80 border border-slate-700/80 opacity-60 transition">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs font-bold text-slate-300">STEP 2: Fretted 12th Fret Note</span>
+                        <span id="frettedLockBadge" class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700 text-slate-400">UNLOCKED</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-xs text-slate-400">Target: <span id="frettedTargetNote" class="text-slate-200 font-bold">E3</span></div>
+                            <div class="text-sm font-mono text-slate-300"><span id="frettedFreqVal">--</span> Hz (<span id="frettedCentsVal">--</span>)</div>
+                        </div>
+                        <button id="btnCaptureFretted" disabled onclick="captureFrettedPitch()" class="px-3 py-1.5 bg-slate-700 text-slate-400 font-bold text-xs rounded-lg active:scale-95 transition shadow">
+                            <i class="fa-solid fa-lock mr-1"></i> Capture 12th
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Comparison & Adjustment Recommendation -->
+                <div id="recommendationBox" class="p-3.5 rounded-lg bg-slate-900 border border-slate-800 text-center">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Intonation Diagnosis</div>
+                    <div id="resultDiff" class="text-base font-extrabold text-slate-300 mb-1">
+                        Pending Measurements...
+                    </div>
+                    <p id="resultAdvice" class="text-xs text-slate-400 leading-relaxed">
+                        Capture both open string and 12th fret pitches to see saddle adjustment advice.
+                    </p>
+                </div>
+
+            </div>
+
+            <!-- Action Controls -->
+            <div class="w-full flex gap-2">
+                <button onclick="resetIntonationWizard()" class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl border border-slate-700 transition active:scale-95">
+                    <i class="fa-solid fa-rotate-left mr-1"></i> Reset String
+                </button>
+                <button onclick="nextString()" class="flex-1 py-2.5 bg-accentCyan hover:bg-cyan-400 text-slate-950 font-bold text-xs rounded-xl transition active:scale-95 shadow">
+                    Next String <i class="fa-solid fa-chevron-right ml-1"></i>
+                </button>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- Modal Message Container -->
+    <div id="messageModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-cardBg border border-slate-700 p-6 rounded-2xl max-w-xs w-full text-center shadow-2xl">
+            <div id="modalIcon" class="text-4xl mb-3 text-accentAmber"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <h3 id="modalTitle" class="text-lg font-bold text-slate-100 mb-2">Notice</h3>
+            <p id="modalBody" class="text-xs text-slate-300 mb-5 leading-relaxed"></p>
+            <button onclick="closeModal()" class="w-full py-2.5 bg-accentCyan text-slate-950 font-bold rounded-xl text-xs active:scale-95 transition">
+                Got it
+            </button>
+        </div>
+    </div>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        /* ===================================================================
+           1. CONSTANTS & NOTE DEFINITIONS
+           =================================================================== */
+        const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        const CONCERT_A = 440.0; // Reference pitch
+
+        // Standard Guitar Tunings Database
+        const TUNINGS = {
+            standard: { name: "Standard", notes: ["E2", "A2", "D3", "G3", "B3", "E4"] },
+            dropd:    { name: "Drop D", notes: ["D2", "A2", "D3", "G3", "B3", "E4"] },
+            halfstep: { name: "Half-Step Down", notes: ["D#2", "G#2", "C#3", "F#3", "A#3", "D#4"] },
+            fullstep: { name: "Full-Step Down", notes: ["D2", "G2", "C3", "F3", "A3", "D4"] },
+            openG:    { name: "Open G", notes: ["D2", "G2", "D3", "G3", "B3", "D4"] },
+            openD:    { name: "Open D", notes: ["D2", "A2", "D3", "F#3", "A3", "D4"] }
+        };
+
+        /* ===================================================================
+           2. APPLICATION STATE
+           =================================================================== */
+        let audioCtx = null;
+        let analyser = null;
+        let microphoneStream = null;
+        let isAudioRunning = false;
+        let noiseGateThreshold = 0.008;
+
+        let activeTab = 'tuner'; // 'tuner' | 'intonation'
+        let currentPitch = { freq: 0, note: '--', octave: '', targetFreq: 0, cents: 0 };
+
+        // Intonation Wizard State
+        let selectedPresetKey = 'standard';
+        let selectedStringIdx = 0; // 0 to 5
+        let intonationData = {
+            openPitch: null,    // { freq, cents, note }
+            frettedPitch: null  // { freq, cents, note }
+        };
+
+        /* ===================================================================
+           3. AUDIO PROCESSING & PITCH DETECTION (AUTOCORRELATION)
+           =================================================================== */
+        
+        async function toggleAudio() {
+            if (isAudioRunning) {
+                stopAudio();
+            } else {
+                await startAudio();
+            }
+        }
+
+        async function startAudio() {
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+
+                // Request low-latency microphone stream
+                microphoneStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false,
+                        latency: 0
+                    }
+                });
+
+                const source = audioCtx.createMediaStreamSource(microphoneStream);
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 4096; // High FFT size for improved low-frequency guitar resolution
+                source.connect(analyser);
+
+                isAudioRunning = true;
+                updateMicUI(true);
+                processAudioLoop();
+
+            } catch (err) {
+                showModal("Microphone Error", "Unable to access microphone. Please ensure microphone permissions are granted.");
+                console.error("Audio initialization error:", err);
+            }
+        }
+
+        function stopAudio() {
+            if (microphoneStream) {
+                microphoneStream.getTracks().forEach(track => track.stop());
+            }
+            if (audioCtx) {
+                audioCtx.close();
+            }
+            isAudioRunning = false;
+            updateMicUI(false);
+            resetPitchDisplay();
+        }
+
+        function updateMicUI(active) {
+            const btn = document.getElementById('micBtn');
+            const icon = document.getElementById('micIcon');
+            const text = document.getElementById('micText');
+
+            if (active) {
+                btn.classList.replace('bg-slate-700/80', 'bg-emerald-950');
+                btn.classList.add('border-emerald-500');
+                icon.classList.replace('bg-red-500', 'bg-emerald-400');
+                text.innerText = "LISTENING";
+                text.classList.add('text-emerald-400');
+            } else {
+                btn.classList.replace('bg-emerald-950', 'bg-slate-700/80');
+                btn.classList.remove('border-emerald-500');
+                icon.classList.replace('bg-emerald-400', 'bg-red-500');
+                text.innerText = "TAP TO START";
+                text.classList.remove('text-emerald-400');
+            }
+        }
+
+        function updateGate(val) {
+            noiseGateThreshold = parseFloat(val);
+        }
+
+        // Core Pitch Processing Loop
+        function processAudioLoop() {
+            if (!isAudioRunning) return;
+
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
+
+            // Compute Root Mean Square (RMS) volume level
+            let rms = 0;
+            for (let i = 0; i < buffer.length; i++) {
+                rms += buffer[i] * buffer[i];
+            }
+            rms = Math.sqrt(rms / buffer.length);
+
+            // Update UI signal meter
+            const signalBar = document.getElementById('signalMeter');
+            const signalPct = Math.min(100, Math.max(0, rms * 1500));
+            signalBar.style.width = signalPct + '%';
+
+            // Filter out signals under noise gate threshold
+            if (rms > noiseGateThreshold) {
+                const pitch = autoCorrelate(buffer, audioCtx.sampleRate);
+                if (pitch !== -1 && pitch >= 50 && pitch <= 1100) { // Guitar frequency range limits
+                    calculateNoteAndCents(pitch);
+                    updateUI();
+                }
+            } else {
+                // Decay UI toward neutral if no sound detected
+                decayPitchUI();
+            }
+
+            requestAnimationFrame(processAudioLoop);
+        }
+
+        /**
+         * Enhanced Autocorrelation algorithm with Parabolic Interpolation for accurate pitch estimation.
+         */
+        function autoCorrelate(buffer, sampleRate) {
+            const SIZE = buffer.length;
+            
+            // Calculate Autocorrelation
+            const c = new Float32Array(SIZE);
+            for (let i = 0; i < SIZE; i++) {
+                for (let j = 0; j < SIZE - i; j++) {
+                    c[i] += buffer[j] * buffer[j + i];
+                }
+            }
+
+            // Find first local minimum after zero-crossing
+            let d = 0;
+            while (c[d] > c[d + 1]) d++;
+
+            // Find global peak after first minimum
+            let maxValue = -1;
+            let maxIndex = -1;
+
+            for (let i = d; i < SIZE; i++) {
+                if (c[i] > maxValue) {
+                    maxValue = c[i];
+                    maxIndex = i;
+                }
+            }
+
+            let T0 = maxIndex;
+
+            // Parabolic Interpolation for sub-sample accuracy
+            if (T0 > 0 && T0 < SIZE - 1) {
+                const x1 = c[T0 - 1];
+                const x2 = c[T0];
+                const x3 = c[T0 + 1];
+
+                const a = (x1 + x3 - 2 * x2) / 2;
+                const b = (x3 - x1) / 2;
+                if (a !== 0) {
+                    T0 = T0 - b / (2 * a);
+                }
+            }
+
+            return sampleRate / T0;
+        }
+
+        /* ===================================================================
+           4. NOTE & CENTS CONVERSION LOGIC
+           =================================================================== */
+        
+        function calculateNoteAndCents(freq) {
+            // MIDI Note Number formula: 69 + 12 * log2(freq / 440)
+            const midiNum = 69 + 12 * Math.log2(freq / CONCERT_A);
+            const roundedMidi = Math.round(midiNum);
+
+            const noteName = NOTE_NAMES[roundedMidi % 12];
+            const octave = Math.floor(roundedMidi / 12) - 1;
+            const targetFreq = CONCERT_A * Math.pow(2, (roundedMidi - 69) / 12);
+
+            // Cents deviation formula: 1200 * log2(freq / targetFreq)
+            const cents = 1200 * Math.log2(freq / targetFreq);
+
+            currentPitch = {
+                freq: freq,
+                note: noteName,
+                octave: octave,
+                targetFreq: targetFreq,
+                cents: cents
+            };
+        }
+
+        function decayPitchUI() {
+            // Gradually ease needle back to center when quiet
+            currentPitch.cents *= 0.85;
+            if (Math.abs(currentPitch.cents) < 0.1) currentPitch.cents = 0;
+            drawGauge(currentPitch.cents);
+        }
+
+        /* ===================================================================
+           5. UI RENDERING & GAUGE DRAWING
+           =================================================================== */
+        
+        function updateUI() {
+            // Update Chromatic Tuner Elements
+            document.getElementById('noteBadge').innerText = currentPitch.note;
+            document.getElementById('octaveBadge').innerText = currentPitch.octave;
+            document.getElementById('freqDetected').innerText = currentPitch.freq.toFixed(1);
+            document.getElementById('freqTarget').innerText = currentPitch.targetFreq.toFixed(1);
+
+            const centsText = document.getElementById('centsText');
+            const sign = currentPitch.cents > 0 ? '+' : '';
+            centsText.innerText = `${sign}${currentPitch.cents.toFixed(1)}`;
+
+            // Color status styling based on cents accuracy
+            const absCents = Math.abs(currentPitch.cents);
+            const noteBadge = document.getElementById('noteBadge');
+            const centsContainer = document.getElementById('centsContainer');
+
+            if (absCents <= 2.0) { // Perfect in tune
+                noteBadge.className = 'text-7xl font-black tracking-tight text-emerald-400 drop-shadow-[0_0_15px_rgba(16,185,129,0.5)]';
+                centsContainer.className = 'mt-1 px-4 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/50 text-emerald-400';
+            } else if (absCents <= 10.0) { // Slightly off
+                noteBadge.className = 'text-7xl font-black tracking-tight text-amber-400';
+                centsContainer.className = 'mt-1 px-4 py-1 rounded-full bg-amber-950/80 border border-amber-500/50 text-amber-400';
+            } else { // Far off
+                noteBadge.className = 'text-7xl font-black tracking-tight text-red-500';
+                centsContainer.className = 'mt-1 px-4 py-1 rounded-full bg-red-950/80 border border-red-500/50 text-red-400';
+            }
+
+            // Draw Tuner Gauge Arc
+            drawGauge(currentPitch.cents);
+        }
+
+        function resetPitchDisplay() {
+            document.getElementById('noteBadge').innerText = '--';
+            document.getElementById('octaveBadge').innerText = '';
+            document.getElementById('freqDetected').innerText = '0.0';
+            document.getElementById('freqTarget').innerText = '0.0';
+            document.getElementById('centsText').innerText = '+0.0';
+            document.getElementById('signalMeter').style.width = '0%';
+            drawGauge(0);
+        }
+
+        // HTML Canvas Gauge Renderer
+        function drawGauge(cents) {
+            const canvas = document.getElementById('gaugeCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+
+            // Handle high-DPI crisp canvas scaling
+            const dpr = window.devicePixelRatio || 1;
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+            
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            ctx.scale(dpr, dpr);
+
+            ctx.clearRect(0, 0, width, height);
+
+            const centerX = width / 2;
+            const centerY = height - 15;
+            const radius = Math.min(width / 2 - 20, height - 25);
+
+            // 1. Draw Background Gauge Arc (-50 to +50 cents)
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, Math.PI, 2 * Math.PI, false);
+            ctx.lineWidth = 10;
+            ctx.strokeStyle = '#334155'; // slate-700
+            ctx.stroke();
+
+            // 2. Draw Center "Sweet Spot" Target Zone (±2 Cents)
+            const inTuneAngleStart = Math.PI + (Math.PI * 0.48);
+            const inTuneAngleEnd = Math.PI + (Math.PI * 0.52);
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, inTuneAngleStart, inTuneAngleEnd, false);
+            ctx.lineWidth = 12;
+            ctx.strokeStyle = '#10b981'; // emerald-500
+            ctx.stroke();
+
+            // 3. Draw Tick Marks
+            for (let c = -50; c <= 50; c += 10) {
+                const angle = Math.PI + ((c + 50) / 100) * Math.PI;
+                const isMajor = c === 0 || c === -50 || c === 50;
+                const tickLen = isMajor ? 12 : 6;
+
+                const x1 = centerX + (radius - tickLen) * Math.cos(angle);
+                const y1 = centerY + (radius - tickLen) * Math.sin(angle);
+                const x2 = centerX + (radius + 4) * Math.cos(angle);
+                const y2 = centerY + (radius + 4) * Math.sin(angle);
+
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.lineWidth = isMajor ? 2 : 1;
+                ctx.strokeStyle = isMajor ? '#94a3b8' : '#475569';
+                ctx.stroke();
+            }
+
+            // 4. Draw Moving Needle Pointer
+            const clampedCents = Math.max(-50, Math.min(50, cents));
+            const needleAngle = Math.PI + ((clampedCents + 50) / 100) * Math.PI;
+
+            const needleX = centerX + (radius - 5) * Math.cos(needleAngle);
+            const needleY = centerY + (radius - 5) * Math.sin(needleAngle);
+
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            ctx.lineTo(needleX, needleY);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = Math.abs(clampedCents) <= 2 ? '#10b981' : (Math.abs(clampedCents) <= 10 ? '#f59e0b' : '#ef4444');
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Center Pivot Dot
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 6, 0, 2 * Math.PI);
+            ctx.fillStyle = '#f8fafc';
+            ctx.fill();
+        }
+
+        /* ===================================================================
+           6. GUITAR INTONATION WIZARD LOGIC
+           =================================================================== */
+        
+        function renderStringSelector() {
+            const container = document.getElementById('stringSelector');
+            container.innerHTML = '';
+
+            const preset = TUNINGS[selectedPresetKey];
+            document.getElementById('currentTuningName').innerText = preset.name;
+
+            preset.notes.forEach((noteStr, idx) => {
+                const isSelected = idx === selectedStringIdx;
+                const btn = document.createElement('button');
+                btn.onclick = () => selectGuitarString(idx);
+
+                btn.className = `flex flex-col items-center justify-center py-2 rounded-lg border text-xs font-bold transition ${
+                    isSelected 
+                        ? 'bg-accentCyan text-slate-950 border-cyan-400 shadow-md scale-105' 
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
+                }`;
+
+                btn.innerHTML = `
+                    <span class="text-[10px] opacity-70">${6 - idx}</span>
+                    <span class="text-sm font-extrabold">${noteStr}</span>
+                `;
+                container.appendChild(btn);
+            });
+
+            updateIntonationTargets();
+        }
+
+        function selectGuitarString(idx) {
+            selectedStringIdx = idx;
+            resetIntonationWizard();
+            renderStringSelector();
+        }
+
+        function updateIntonationTargets() {
+            const openNote = TUNINGS[selectedPresetKey].notes[selectedStringIdx];
+            
+            // Extract note name and octave for 12th fret target (+1 octave higher)
+            const noteName = openNote.replace(/[0-9]/g, '');
+            const octave = parseInt(openNote.replace(/[^0-9]/g, ''), 10);
+            const frettedNote = `${noteName}${octave + 1}`;
+
+            document.getElementById('openTargetNote').innerText = openNote;
+            document.getElementById('frettedTargetNote').innerText = frettedNote;
+        }
+
+        function captureOpenPitch() {
+            if (!isAudioRunning || currentPitch.freq === 0) {
+                showModal("Audio Inactive", "Please tap 'TAP TO START' at the top to activate microphone input first.");
+                return;
+            }
+
+            intonationData.openPitch = {
+                freq: currentPitch.freq,
+                cents: currentPitch.cents,
+                note: currentPitch.note + currentPitch.octave
+            };
+
+            // Update Step 1 UI
+            document.getElementById('openFreqVal').innerText = currentPitch.freq.toFixed(1);
+            document.getElementById('openCentsVal').innerText = (currentPitch.cents >= 0 ? '+' : '') + currentPitch.cents.toFixed(1) + 'c';
+            
+            const badge = document.getElementById('openLockBadge');
+            badge.innerText = "LOCKED";
+            badge.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800";
+
+            // Unlock Step 2
+            document.getElementById('step2Box').classList.remove('opacity-60');
+            const btn12 = document.getElementById('btnCaptureFretted');
+            btn12.disabled = false;
+            btn12.className = "px-3 py-1.5 bg-accentCyan hover:bg-cyan-400 text-slate-950 font-bold text-xs rounded-lg active:scale-95 transition shadow";
+
+            evaluateIntonation();
+        }
+
+        function captureFrettedPitch() {
+            if (!isAudioRunning || currentPitch.freq === 0) {
+                showModal("Audio Inactive", "Please play the 12th fret note into the microphone.");
+                return;
+            }
+
+            intonationData.frettedPitch = {
+                freq: currentPitch.freq,
+                cents: currentPitch.cents,
+                note: currentPitch.note + currentPitch.octave
+            };
+
+            // Update Step 2 UI
+            document.getElementById('frettedFreqVal').innerText = currentPitch.freq.toFixed(1);
+            document.getElementById('frettedCentsVal').innerText = (currentPitch.cents >= 0 ? '+' : '') + currentPitch.cents.toFixed(1) + 'c';
+
+            const badge = document.getElementById('frettedLockBadge');
+            badge.innerText = "LOCKED";
+            badge.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800";
+
+            evaluateIntonation();
+        }
+
+        function evaluateIntonation() {
+            if (!intonationData.openPitch || !intonationData.frettedPitch) return;
+
+            // Difference in cents between 12th fret reading and open string reading
+            const diffCents = intonationData.frettedPitch.cents - intonationData.openPitch.cents;
+
+            const resDiff = document.getElementById('resultDiff');
+            const resAdvice = document.getElementById('resultAdvice');
+            const recBox = document.getElementById('recommendationBox');
+
+            const diffSign = diffCents >= 0 ? '+' : '';
+            resDiff.innerText = `Difference: ${diffSign}${diffCents.toFixed(1)} Cents`;
+
+            if (Math.abs(diffCents) <= 1.5) {
+                // PERFECT INTONATION
+                recBox.className = "p-3.5 rounded-lg bg-emerald-950/80 border border-emerald-600/60 text-center";
+                resDiff.className = "text-base font-extrabold text-emerald-400 mb-1";
+                resAdvice.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i> Intonation is <strong class="text-emerald-300">PERFECT!</strong> No bridge saddle adjustment needed for this string.`;
+            } else if (diffCents > 1.5) {
+                // SHARP (Fretted pitch is higher than open pitch reference)
+                recBox.className = "p-3.5 rounded-lg bg-red-950/80 border border-red-600/60 text-center";
+                resDiff.className = "text-base font-extrabold text-red-400 mb-1";
+                resAdvice.innerHTML = `<i class="fa-solid fa-arrow-down-long text-red-400 mr-1"></i> 12th fret is <strong>SHARP</strong>.<br>Move the bridge saddle <strong>BACK (away from the neck)</strong> to lengthen string scale length.`;
+            } else {
+                // FLAT (Fretted pitch is lower than open pitch reference)
+                recBox.className = "p-3.5 rounded-lg bg-amber-950/80 border border-amber-600/60 text-center";
+                resDiff.className = "text-base font-extrabold text-amber-400 mb-1";
+                resAdvice.innerHTML = `<i class="fa-solid fa-arrow-up-long text-amber-400 mr-1"></i> 12th fret is <strong>FLAT</strong>.<br>Move the bridge saddle <strong>FORWARD (towards the neck)</strong> to shorten string scale length.`;
+            }
+        }
+
+        function resetIntonationWizard() {
+            intonationData = { openPitch: null, frettedPitch: null };
+
+            document.getElementById('openFreqVal').innerText = '--';
+            document.getElementById('openCentsVal').innerText = '--';
+            document.getElementById('frettedFreqVal').innerText = '--';
+            document.getElementById('frettedCentsVal').innerText = '--';
+
+            const openBadge = document.getElementById('openLockBadge');
+            openBadge.innerText = "UNLOCKED";
+            openBadge.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700 text-slate-400";
+
+            const frettedBadge = document.getElementById('frettedLockBadge');
+            frettedBadge.innerText = "UNLOCKED";
+            frettedBadge.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700 text-slate-400";
+
+            document.getElementById('step2Box').classList.add('opacity-60');
+            const btn12 = document.getElementById('btnCaptureFretted');
+            btn12.disabled = true;
+            btn12.className = "px-3 py-1.5 bg-slate-700 text-slate-400 font-bold text-xs rounded-lg active:scale-95 transition shadow";
+
+            const recBox = document.getElementById('recommendationBox');
+            recBox.className = "p-3.5 rounded-lg bg-slate-900 border border-slate-800 text-center";
+            document.getElementById('resultDiff').innerText = "Pending Measurements...";
+            document.getElementById('resultDiff').className = "text-base font-extrabold text-slate-300 mb-1";
+            document.getElementById('resultAdvice').innerText = "Capture both open string and 12th fret pitches to see saddle adjustment advice.";
+        }
+
+        function nextString() {
+            selectedStringIdx = (selectedStringIdx + 1) % 6;
+            selectGuitarString(selectedStringIdx);
+        }
+
+        function onTuningPresetChange() {
+            const select = document.getElementById('tuningSelect');
+            selectedPresetKey = select.value;
+            renderStringSelector();
+        }
+
+        /* ===================================================================
+           7. APP UI NAVIGATION & MODALS
+           =================================================================== */
+        
+        function switchTab(tab) {
+            activeTab = tab;
+            const viewTuner = document.getElementById('viewTuner');
+            const viewIntonation = document.getElementById('viewIntonation');
+            const tabTuner = document.getElementById('tabTuner');
+            const tabIntonation = document.getElementById('tabIntonation');
+
+            if (tab === 'tuner') {
+                viewTuner.classList.remove('hidden');
+                viewIntonation.classList.add('hidden');
+                tabTuner.className = "py-2 text-xs font-bold rounded-md bg-accentCyan text-slate-950 transition shadow";
+                tabIntonation.className = "py-2 text-xs font-bold rounded-md text-slate-400 hover:text-slate-200 transition";
+            } else {
+                viewTuner.classList.add('hidden');
+                viewIntonation.classList.remove('hidden');
+                tabIntonation.className = "py-2 text-xs font-bold rounded-md bg-accentCyan text-slate-950 transition shadow";
+                tabTuner.className = "py-2 text-xs font-bold rounded-md text-slate-400 hover:text-slate-200 transition";
+            }
+        }
+
+        function showModal(title, body) {
+            document.getElementById('modalTitle').innerText = title;
+            document.getElementById('modalBody').innerText = body;
+            document.getElementById('messageModal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('messageModal').classList.add('hidden');
+        }
+
+        /* Initial Setup on Page Load */
+        window.addEventListener('load', () => {
+            renderStringSelector();
+            drawGauge(0);
+        });
+
+        window.addEventListener('resize', () => {
+            drawGauge(currentPitch.cents || 0);
+        });
+    </script>
+</body>
+</html>
